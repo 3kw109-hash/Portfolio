@@ -1,0 +1,939 @@
+---
+title: "506HWFinalP"
+author: "Kyle Weber"
+date: "2024-11-15"
+output:
+  html_document: default
+  word_document: default
+---
+
+---
+title: '<font size = 7 color = "white">Analyzation of Credit Approval rates using logistic regression.</font>'
+subtitle: '<img src="Pimg/WCUL.png" width=100 height=100>'
+author: '<font size = 5 color = "white"> Kyle Weber </font>'
+institute: '<font size = 6 color = "white">West Chester University of Pennsylvania</font><br> '
+date: ' <font color = "white" size =4> Prepared for<br> </font> <br> <font color = "gold" size = 6> STA490: Data Visualization </font> <br> <br> <font color = "white" size = 3> Slides available at: https://rpubs.com/KW986324 AND https://github.com/Kyle-Weber/STA490</font>'
+output:
+  xaringan::moon_reader:
+    css: xaringan-themer01.css
+    nature:
+      slideNumberFormat: "%current%"
+      highlightStyle: github
+      highlightLines: true
+      ratio: 16:9
+      countIncrementalSlides: true
+---
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+if (!require("knitr")) {
+   install.packages("knitr")
+   library(knitr)
+}
+if (!require("pander")) {
+   install.packages("pander")
+   library(pander)
+}
+if (!require("plotly")) {
+   install.packages("plotly")
+   library(plotly)
+}
+if (!require("ggplot2")) {
+   install.packages("ggplot2")
+   library(ggplot2)
+}
+knitr::opts_chunk$set(
+                  fig.width=3, 
+                  fig.height=3, 
+                  fig.retina=12,
+                  out.width = "100%",
+                  cache = FALSE,
+                  echo = FALSE,
+                  message = FALSE, 
+                  warning = FALSE,
+                  hiline = TRUE
+                  )
+```
+
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+library(xaringanthemer)
+  style_duo_accent(primary_color = "#1F4257",
+          secondary_color = "#380F2A",
+          # fonts
+          header_font_google = google_font("Martel"),
+          text_font_google = google_font("Lato"),
+          code_font_google = google_font("Fira Mono"))
+  
+
+```
+
+
+```{r, include=FALSE}
+ if (!require("xaringanthemer")) {
+      install.packages("xaringanthemer")
+      library(xaringanthemer)
+     }
+```
+
+```{r, include=FALSE}
+
+library(mlbench)
+students <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv", header = TRUE)
+
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+if (!require("DT")) {
+      install.packages("DT")
+      library(DT)
+     }
+
+if (!require("plotly")) {
+      install.packages("plotly")
+      library(plotly)
+     }
+
+
+
+library(psych)
+library(dplyr)      
+library(sampling)   
+library(survey)  
+
+```
+
+##    Problem 1:
+
+Overview of simple random sample and stratified sampling:
+
+
+Taking a sample size 60 we can conduct both a stratified sample and a simple random sample to find the estimated mean weight and standard deviation. With just one round of stratified sampling, the results for the stratified sampling is, estimated mean weight = 156.1333, and an estimated standard deviation of 29.4316.
+
+```{r}
+# Compute sample sizes for each group
+female_size <- round(60 * 790 / 1490)
+male_size <- 60 - female_size
+
+
+sample_sizes <- data.frame(
+  Gender = c("Female", "Male"),
+  Size = c(female_size, male_size)
+)
+
+# Stratified sampling using group_map
+stratified_sample <- students %>%
+  group_by(Gender) %>%
+  group_map(~ sample_n(.x, size = sample_sizes$Size[sample_sizes$Gender == .y$Gender[1]])) %>%
+  bind_rows()
+
+# Calculate mean and standard deviation for Weight in the stratified sample
+stratified_mean_weight <- mean(stratified_sample$Weight)
+stratified_sd_weight <- sd(stratified_sample$Weight)
+
+# Print results
+cat("Stratified Sampling Results:\n")
+cat("Estimated Mean Weight:", stratified_mean_weight, "\n")
+cat("Estimated Standard Deviation:", stratified_sd_weight, "\n")
+
+
+```
+
+```{r}
+# Simple Random Sampling without replacement
+srs_sample <- students %>%
+  sample_n(size = 60)
+
+# Calculate mean and standard deviation for Weight in the SRS
+srs_mean_weight <- mean(srs_sample$Weight)
+srs_sd_weight <- sd(srs_sample$Weight)
+
+```
+
+
+The simple random sample results provide a slightly lower estimates than the stratified results, with the estimated mean at 155.8833, and a standard deviation of 27.38433. 
+
+```{r}
+# Print or store results
+cat("Stratified Sampling Results:\n")
+cat("Estimated Mean Weight:", stratified_mean_weight, "\n")
+cat("Estimated Standard Deviation:", stratified_sd_weight, "\n\n")
+
+cat("Simple Random Sampling Results:\n")
+cat("Estimated Mean Weight:", srs_mean_weight, "\n")
+cat("Estimated Standard Deviation:", srs_sd_weight, "\n")
+
+```
+
+Running each of the results 5 different times, will give us the following table. 
+
+```{r}
+# Initialize vectors to store results
+stratified_means <- numeric(5)
+stratified_sds <- numeric(5)
+srs_means <- numeric(5)
+srs_sds <- numeric(5)
+
+# Compute sample sizes for each group
+sample_sizes <- data.frame(
+  Gender = c("Female", "Male"),
+  Size = c(female_size, male_size)
+)
+
+# Loop 5 times for both stratified sampling and SRS
+set.seed(123)  # For reproducibility
+for (i in 1:5) {
+  # Stratified Sampling
+  stratified_sample <- students %>%
+    group_by(Gender) %>%
+    group_map(~ sample_n(.x, size = sample_sizes$Size[sample_sizes$Gender == .y$Gender[1]])) %>%
+    bind_rows()
+  
+  stratified_means[i] <- mean(stratified_sample$Weight)
+  stratified_sds[i] <- sd(stratified_sample$Weight)
+  
+  # Simple Random Sampling
+  srs_sample <- students %>%
+    sample_n(size = 60)
+  
+  srs_means[i] <- mean(srs_sample$Weight)
+  srs_sds[i] <- sd(srs_sample$Weight)
+}
+
+# Combine results into a data frame for easy comparison
+results <- data.frame(
+  Trial = 1:5,
+  Stratified_Mean = stratified_means,
+  Stratified_SD = stratified_sds,
+  SRS_Mean = srs_means,
+  SRS_SD = srs_sds
+)
+
+# Display results
+print(results)
+
+
+```
+
+It is possible to average the five different samples for each technique and get the following results. 
+
+```{r}
+
+# Calculate averages
+average_stratified_mean_weight <- mean(results$Stratified_Mean)
+average_stratified_sd_weight <- mean(results$Stratified_SD)
+average_srs_mean_weight <- mean(results$SRS_Mean)
+average_srs_sd_weight <- mean(results$SRS_SD)
+
+# Display the average results
+cat("\nAverages:\n")
+cat("Average Stratified Mean Weight:", average_stratified_mean_weight, "\n")
+cat("Average Stratified Standard Deviation Weight:", average_stratified_sd_weight, "\n")
+cat("Average SRS Mean Weight:", average_srs_mean_weight, "\n")
+cat("Average SRS Standard Deviation Weight:", average_srs_sd_weight, "\n")
+
+```
+
+Overall stratified sampling seems to be a better technique here, with it having a slightly lower standard deviation than a simple random sample. 
+
+The results highlight the distinctions between stratified sampling, simple random sampling (SRS), and cluster sampling in estimating the mean weight and GPA. Stratified sampling accounts for population subgroups, such as gender, ensuring proportional representation in the sample. This suggests that stratified sampling is generally more precise, especially when subgroup characteristics significantly influence the variable of interest. For GPA, stratified sampling adjusted for gender proportions and delivered relatively consistent means and lower variability compared to SRS. In contrast, simple random sampling assumes equal access to all individuals but lacks subgroup adjustments, which can increase variability.
+
+
+##    Problem 2:
+Stratified sampling provided precise and consistent GPA estimates, with an average mean GPA of 3.164 and an average standard deviation of 0.497 across five runs. This method ensures that both genders are proportionally represented, which minimizes bias and reduces variability. In contrast, simple random sampling (SRS) had a slightly higher average mean GPA of 3.180 and a standard deviation of 0.501. The variability in SRS results stems from the potential under- or over-representation of one gender due to purely random selection, highlighting its limitation in ensuring subgroup representation.
+
+Cluster sampling, used to estimate weights, showed greater variability in unbiased means compared to stratified sampling, as clusters may differ significantly in characteristics. The ratio estimator improved precision when population-level totals were incorporated, underscoring its utility in adjusting for sampling variability. While SRS remains a reliable and unbiased method for GPA and weight estimation, stratified sampling is preferred when subgroup representation is crucial. Cluster sampling offers practical benefits in grouped populations but may require additional adjustments, such as ratio estimation, to enhance accuracy.
+
+
+```{r}
+# Total sample size
+total_sample_size <- 60
+
+# Population proportions
+female_size <- round(total_sample_size * (790 / 1490))
+male_size <- total_sample_size - female_size
+
+# Print sample sizes
+cat("Sample sizes:\n")
+cat("Females:", female_size, "\n")
+cat("Males:", male_size, "\n")
+
+```
+
+Stratified sampling accounts for gender proportions in the population, leading to more precise estimates with reduced variability. By ensuring representation from both genders, this method minimizes sampling bias that could occur if one group is underrepresented. Here, we estimated the mean gpa of the 1490 students, through a stratified sampling. Conducting this test 5 times, the following amounts were gathered. 
+```{r}
+
+# Repeat Stratified Sampling 5 Times
+stratified_results <- replicate(5, {
+  stratified_sample <- students %>%
+    group_by(Gender) %>%
+    group_map(~ sample_n(.x, size = ifelse(.y$Gender[1] == "Female", female_size, male_size))) %>%
+    bind_rows()
+  
+  # Compute statistics
+  mean_gpa <- mean(stratified_sample$GPA)
+  sd_gpa <- sd(stratified_sample$GPA)
+  
+  c(Mean_GPA = mean_gpa, SD_GPA = sd_gpa)
+}, simplify = TRUE)
+
+# Convert to data frame
+stratified_results_df <- as.data.frame(t(stratified_results))
+colnames(stratified_results_df) <- c("Mean_GPA", "SD_GPA")
+print("Stratified Sampling Results (5 Runs):")
+print(stratified_results_df)
+
+```
+
+Next, The Simple Random Sampling (SRS) method was employed to estimate the mean GPA and standard deviation (SD) of a sample of students across five different runs. The mean GPA for the five runs ranges from 3.146500 to 3.225667.
+
+Despite the random nature of the sampling, the mean GPA values show moderate consistency with some variability. This suggests that while SRS can give a good estimate, the inherent randomness can lead to fluctuations.
+
+The SD for the five runs ranges from 0.429285 to 0.554503.
+
+There is noticeable variability in the standard deviation, which indicates that the spread of GPAs in the sampled groups can differ significantly between runs. This variability is a consequence of the random selection process that does not control for specific group proportions, such as gender.
+```{r}
+
+# Repeat Simple Random Sampling 5 Times
+srs_results <- replicate(5, {
+  srs_sample <- students %>%
+    sample_n(size = total_sample_size)
+  
+  # Compute statistics
+  mean_gpa <- mean(srs_sample$GPA)
+  sd_gpa <- sd(srs_sample$GPA)
+  
+  c(Mean_GPA = mean_gpa, SD_GPA = sd_gpa)
+}, simplify = TRUE)
+
+# Convert to data frame
+srs_results_df <- as.data.frame(t(srs_results))
+colnames(srs_results_df) <- c("Mean_GPA", "SD_GPA")
+print("Simple Random Sampling Results (5 Runs):")
+print(srs_results_df)
+
+```
+
+Comparison of Results:
+
+Stratified Sampling Results:
+
+Runs: The mean GPA for the five runs of stratified sampling ranges from 3.125667 to 3.186833.
+
+Standard Deviation (SD): The SD ranges from 0.4551904 to 0.5182937.
+
+Averages: The average mean GPA across the five runs is 3.164333, and the average SD is 0.4970007.
+
+Simple Random Sampling (SRS) Results:
+
+Runs: The mean GPA for the five runs of simple random sampling ranges from 3.146500 to 3.225667.
+
+Standard Deviation (SD): The SD ranges from 0.4292854 to 0.5545028.
+
+Averages: The average mean GPA across the five runs is 3.179667, and the average SD is 0.5011858.
+
+```{r}
+# Combine Results for Comparison
+comparison_results <- data.frame(
+  Method = rep(c("Stratified Sampling", "Simple Random Sampling"), each = 5),
+  Run = rep(1:5, times = 2),
+  Mean_GPA = c(stratified_results_df$Mean_GPA, srs_results_df$Mean_GPA),
+  SD_GPA = c(stratified_results_df$SD_GPA, srs_results_df$SD_GPA)
+)
+
+print("Comparison of Results:")
+print(comparison_results)
+```
+
+
+```{r}
+
+# Calculate averages
+average_stratified_mean_GPA <- mean(stratified_results_df$Mean_GPA)
+average_stratified_sd_GPA <- mean(stratified_results_df$SD_GPA)
+average_srs_mean_GPA <- mean(srs_results_df$Mean_GPA)
+average_srs_sd_GPA <- mean(srs_results_df$SD_GPA)
+
+# Display the average results
+cat("Averages:\n")
+cat("Average Stratified Mean GPA:", average_stratified_mean_GPA, "\n")
+cat("Average Stratified Standard Deviation GPA:", average_stratified_sd_GPA, "\n")
+cat("Average SRS Mean GPA:", average_srs_mean_GPA, "\n")
+cat("Average SRS Standard Deviation GPA:", average_srs_sd_GPA, "\n")
+
+
+```
+
+Stratified sampling adjusts for gender proportions by dividing the population into distinct subgroups (strata) and then sampling from each stratum proportionally. This method reduces sampling variability because it ensures that each subgroup is adequately represented in the sample. As a result, the estimates are more precise and consistent across multiple runs. The average mean GPA (3.164333) and SD (0.4970007) reflect this improved precision. The closer alignment of mean GPA values across runs demonstrates the stability provided by stratified sampling.
+
+Simple Random Sampling (SRS): Simple random sampling, on the other hand, selects samples purely by chance without considering subgroup proportions. This method can lead to higher variability in the results, as seen in the wider range of SDs (from 0.4292854 to 0.5545028). The average mean GPA (3.179667) and SD (0.5011858) indicate slightly more variability compared to stratified sampling. This variability arises because SRS might not capture all subgroups proportionately in every sample, leading to fluctuations in the results.
+
+##    Problem 3:
+
+Overview:
+
+Cluster sampling is a technique where the population is divided into separate groups, known as clusters. Each cluster represents a miniature version of the entire population. Instead of sampling individuals from across the entire population, we randomly select a few clusters and then sample all or a subset of individuals within those selected clusters.
+
+An unbiased estimator is a statistic used to estimate a population parameter, where the expected value of the estimator is equal to the true value of the parameter. In the context of cluster sampling, an unbiased estimator ensures that the average of all possible sample estimates will equal the true population parameter.
+
+A biased estimator is one where the expected value does not equal the true value of the population parameter. Bias in estimators can arise due to sampling methods, measurement errors, or data processing techniques. Here, the biased estimator used is a ratio estimator. 
+
+
+Sampling Procedure:
+
+Cluster Sampling:
+
+The population is divided into N clusters, of which n are randomly selected. Here, N = 9 and n = 3. 
+
+Unbiased Estimator:
+
+The mean of the sampled clusters ybar is calculated through the equation ybar = (1/n)sum of i=1 to n for yibar. In other words, The population mean weight (ybar) is calculated by averaging the mean weights of the selected clusters. To do this, first calculate the mean weight within each selected cluster by summing the weights of all individuals in the cluster and dividing by the number of individuals in that cluster. Then, sum the mean weights of all selected clusters and divide by the number of clusters sampled.
+
+
+The standard deviation (SD) is adjusted for the sample size in the following equation. SD = sqrt(1/n(n-1) sum of i=1 to n (Yi-Ybar)^2 ) 
+
+Ratio Estimator:
+
+For each of the selected clusters the sum of the weights (Yi) and the sum of the auxillary variable height (Xi). The ratio (R), can then be calculated with (Yi/Xi). In this case X is the known population total of Height. 
+
+With the estimated population mean being Yratio = (R)(X)
+
+
+The standard deviation (SD) is adjusted for the sample size in the following equation. SD = sqrt(1/n(n-1) sum of i=1 to n (Yi/Xi -R)^2 X) 
+
+Cluster Analysis:
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+data <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv")
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Function to calculate the estimators for one sample of clusters
+calculate_estimators <- function(data) {
+  # Sample 9 clusters explicitly using dplyr::filter
+  sampled_clusters <- data %>%
+    dplyr::filter(cluster %in% sample(unique(cluster), 9, replace = FALSE))  # Ensure no duplicate clusters
+
+  # Calculate the unbiased estimator
+  unbiased_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(cluster_mean = mean(Weight), .groups = "drop") %>%
+    summarise(
+      unbiased_estimator = mean(cluster_mean),
+      sd_unbiased = sqrt(sum((cluster_mean - mean(cluster_mean))^2) / (n() * (n() - 1)))
+    )
+
+  # Calculate the ratio estimator
+  ratio_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(Y_i = sum(Weight), X_i = sum(Height), .groups = "drop") %>%
+    summarise(
+      ratio_estimator = sum(Y_i) / sum(X_i) * mean(data$Height, na.rm = TRUE),
+      sd_ratio = sqrt(sum((Y_i / X_i - sum(Y_i) / sum(X_i))^2) / (n() * (n() - 1))) * mean(data$Height, na.rm = TRUE)
+    )
+
+  # Return results as a single-row data frame
+  return(data.frame(
+    unbiased_estimator = unbiased_results$unbiased_estimator,
+    sd_unbiased = unbiased_results$sd_unbiased,
+    ratio_estimator = ratio_results$ratio_estimator,
+    sd_ratio = ratio_results$sd_ratio
+  ))
+}
+
+# Repeat the process 5 times
+set.seed(123)  # For reproducibility
+results_list <- replicate(5, calculate_estimators(data), simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+results_df <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+  cbind(iteration = i, results_list[[i]])
+}))
+
+# Print the consolidated results
+print("Cluster Sampling Results (5 Runs):")
+print(results_df)
+```
+
+SRS cluster:
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Assuming you have these defined earlier in the cluster sampling section
+n_clusters <- 154 # Total number of clusters
+sampled_clusters <- 9 # Number of clusters sampled
+
+# Calculate the sample size for SRS equivalent to cluster sample
+students_per_cluster <- nrow(data) / n_clusters
+sample_size <- students_per_cluster * sampled_clusters
+
+# Repeat Simple Random Sampling 5 Times
+srs_results_list <- replicate(5, {
+  srs_sample <- data %>%
+    sample_n(size = sample_size)
+  
+  srs_mean_weight <- mean(srs_sample$Weight)
+  srs_sd_weight <- sd(srs_sample$Weight) / sqrt(nrow(srs_sample))
+  
+  data.frame(
+    iteration = NA,
+    SRS_Mean = srs_mean_weight,
+    SRS_SD = srs_sd_weight
+  )
+}, simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+srs_results_df <- do.call(rbind, lapply(seq_along(srs_results_list), function(i) {
+  srs_results_list[[i]]$iteration <- i
+  return(srs_results_list[[i]])
+}))
+
+# Print the consolidated results for SRS
+print("Simple Random Sampling Results (5 Runs):")
+print(srs_results_df)
+
+```
+
+Combined Results:
+
+```{r}
+
+# Load necessary libraries
+library(dplyr)
+data <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv")
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Function to calculate the estimators for one sample of clusters
+calculate_estimators <- function(data) {
+  # Sample 9 clusters explicitly using dplyr::filter
+  sampled_clusters <- data %>%
+    dplyr::filter(cluster %in% sample(unique(cluster), 9, replace = FALSE))  # Ensure no duplicate clusters
+
+  # Calculate the unbiased estimator
+  unbiased_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(cluster_mean = mean(Weight), .groups = "drop") %>%
+    summarise(
+      unbiased_estimator = mean(cluster_mean),
+      sd_unbiased = sqrt(sum((cluster_mean - mean(cluster_mean))^2) / (n() * (n() - 1)))
+    )
+
+  # Calculate the ratio estimator
+  ratio_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(Y_i = sum(Weight), X_i = sum(Height), .groups = "drop") %>%
+    summarise(
+      ratio_estimator = sum(Y_i) / sum(X_i) * mean(data$Height, na.rm = TRUE),
+      sd_ratio = sqrt(sum((Y_i / X_i - sum(Y_i) / sum(X_i))^2) / ((length(Y_i) * (length(Y_i) - 1)))) * mean(data$Height, na.rm = TRUE)
+    )
+
+  # Return results as a single-row data frame
+  return(data.frame(
+    iteration = 1,
+    unbiased_estimator = unbiased_results$unbiased_estimator,
+    sd_unbiased = unbiased_results$sd_unbiased,
+    ratio_estimator = ratio_results$ratio_estimator,
+    sd_ratio = ratio_results$sd_ratio
+  ))
+}
+
+# Repeat the process 5 times
+set.seed(123)  # For reproducibility
+results_list <- replicate(5, calculate_estimators(data), simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+results_df <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+  results_list[[i]]$iteration <- i
+  return(results_list[[i]])
+}))
+
+# Assuming you have these defined earlier in the cluster sampling section
+n_clusters <- 154 # Total number of clusters
+sampled_clusters <- 9 # Number of clusters sampled
+
+# Calculate the sample size for SRS equivalent to cluster sample
+students_per_cluster <- nrow(data) / n_clusters
+sample_size <- round(students_per_cluster * sampled_clusters)
+
+# Repeat Simple Random Sampling 5 Times
+srs_results_list <- replicate(5, {
+  srs_sample <- data %>%
+    sample_n(size = sample_size)
+  
+  srs_mean_weight <- mean(srs_sample$Weight)
+  srs_sd_weight <- sd(srs_sample$Weight) / sqrt(nrow(srs_sample))
+  
+  data.frame(
+    iteration = NA,
+    SRS_Mean = srs_mean_weight,
+    SRS_SD = srs_sd_weight
+  )
+}, simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+srs_results_df <- do.call(rbind, lapply(seq_along(srs_results_list), function(i) {
+  srs_results_list[[i]]$iteration <- i
+  return(srs_results_list[[i]])
+}))
+
+# Combine Cluster Sampling and SRS Results into One Table
+combined_results <- merge(results_df, srs_results_df, by = "iteration", all = TRUE)
+
+# Print the combined results
+print("Combined Results for Cluster Sampling and Simple Random Sampling (5 Runs):")
+print(combined_results)
+
+
+
+
+```
+
+Averages:
+```{r}
+# Load necessary libraries
+library(dplyr)
+data <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv")
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Function to calculate the estimators for one sample of clusters
+calculate_estimators <- function(data) {
+  # Sample 9 clusters explicitly using dplyr::filter
+  sampled_clusters <- data %>%
+    dplyr::filter(cluster %in% sample(unique(cluster), 9, replace = FALSE))  # Ensure no duplicate clusters
+
+  # Calculate the unbiased estimator
+  unbiased_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(cluster_mean = mean(Weight), .groups = "drop") %>%
+    summarise(
+      unbiased_estimator = mean(cluster_mean),
+      sd_unbiased = sqrt(sum((cluster_mean - mean(cluster_mean))^2) / (n() * (n() - 1)))
+    )
+
+  # Calculate the ratio estimator
+  ratio_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(Y_i = sum(Weight), X_i = sum(Height), .groups = "drop") %>%
+    summarise(
+      ratio_estimator = sum(Y_i) / sum(X_i) * mean(data$Height, na.rm = TRUE),
+      sd_ratio = sqrt(sum((Y_i / X_i - sum(Y_i) / sum(X_i))^2) / ((length(Y_i) * (length(Y_i) - 1)))) * mean(data$Height, na.rm = TRUE)
+    )
+
+  # Return results as a single-row data frame
+  return(data.frame(
+    iteration = 1,
+    unbiased_estimator = unbiased_results$unbiased_estimator,
+    sd_unbiased = unbiased_results$sd_unbiased,
+    ratio_estimator = ratio_results$ratio_estimator,
+    sd_ratio = ratio_results$sd_ratio
+  ))
+}
+
+# Repeat the process 5 times
+set.seed(123)  # For reproducibility
+results_list <- replicate(5, calculate_estimators(data), simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+results_df <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+  results_list[[i]]$iteration <- i
+  return(results_list[[i]])
+}))
+
+# Assuming you have these defined earlier in the cluster sampling section
+n_clusters <- 154 # Total number of clusters
+sampled_clusters <- 9 # Number of clusters sampled
+
+# Calculate the sample size for SRS equivalent to cluster sample
+students_per_cluster <- nrow(data) / n_clusters
+sample_size <- round(students_per_cluster * sampled_clusters)
+
+# Repeat Simple Random Sampling 5 Times
+srs_results_list <- replicate(5, {
+  srs_sample <- data %>%
+    sample_n(size = sample_size)
+  
+  srs_mean_weight <- mean(srs_sample$Weight)
+  srs_sd_weight <- sd(srs_sample$Weight) / sqrt(nrow(srs_sample))
+  
+  data.frame(
+    iteration = NA,
+    SRS_Mean = srs_mean_weight,
+    SRS_SD = srs_sd_weight
+  )
+}, simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+srs_results_df <- do.call(rbind, lapply(seq_along(srs_results_list), function(i) {
+  srs_results_list[[i]]$iteration <- i
+  return(srs_results_list[[i]])
+}))
+
+# Combine Cluster Sampling and SRS Results into One Table
+combined_results <- merge(results_df, srs_results_df, by = "iteration", all = TRUE)
+
+# Calculate the average of each column
+average_results <- combined_results %>%
+  summarise(across(starts_with("unbiased_estimator"), mean, na.rm = TRUE),
+            across(starts_with("sd_unbiased"), mean, na.rm = TRUE),
+            across(starts_with("ratio_estimator"), mean, na.rm = TRUE),
+            across(starts_with("sd_ratio"), mean, na.rm = TRUE),
+            across(starts_with("SRS_Mean"), mean, na.rm = TRUE),
+            across(starts_with("SRS_SD"), mean, na.rm = TRUE))
+
+# Print the average results
+print("Average Results for Cluster Sampling and Simple Random Sampling:")
+print(average_results)
+
+```
+
+##    Problem 4:
+
+
+Cluster GPA:
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+data <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv")
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Function to calculate the estimators for one sample of clusters
+calculate_estimators <- function(data) {
+  # Sample 9 clusters explicitly using dplyr::filter
+  sampled_clusters <- data %>%
+    dplyr::filter(cluster %in% sample(unique(cluster), 9, replace = FALSE))  # Ensure no duplicate clusters
+
+  # Calculate the unbiased estimator
+  unbiased_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(cluster_mean = mean(GPA), .groups = "drop") %>%
+    summarise(
+      unbiased_estimator = mean(cluster_mean),
+      sd_unbiased = sqrt(sum((cluster_mean - mean(cluster_mean))^2) / (length(cluster_mean) * (length(cluster_mean) - 1)))
+    )
+
+  # Calculate the ratio estimator
+  ratio_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(Y_i = sum(GPA), X_i = sum(Height), .groups = "drop") %>%
+    summarise(
+      ratio_estimator = sum(Y_i) / sum(X_i) * mean(data$Height, na.rm = TRUE),
+      sd_ratio = sqrt(sum((Y_i / X_i - sum(Y_i) / sum(X_i))^2) / (length(Y_i) * (length(Y_i) - 1))) * mean(data$Height, na.rm = TRUE)
+    )
+
+  # Return results as a single-row data frame
+  return(data.frame(
+    iteration = 1,
+    unbiased_estimator = unbiased_results$unbiased_estimator,
+    sd_unbiased = unbiased_results$sd_unbiased,
+    ratio_estimator = ratio_results$ratio_estimator,
+    sd_ratio = ratio_results$sd_ratio
+  ))
+}
+
+# Repeat the process 5 times
+set.seed(123)  # For reproducibility
+results_list <- replicate(5, calculate_estimators(data), simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+results_df <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+  results_list[[i]]$iteration <- i
+  return(results_list[[i]])
+}))
+
+# Print the cluster sampling results
+print("Cluster Sampling Results (5 Runs):")
+print(results_df)
+
+
+
+```
+
+
+SRS:
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Assuming you have these defined earlier in the cluster sampling section
+n_clusters <- 154 # Total number of clusters
+sampled_clusters <- 9 # Number of clusters sampled
+
+# Calculate the sample size for SRS equivalent to cluster sample
+students_per_cluster <- nrow(data) / n_clusters
+sample_size <- round(students_per_cluster * sampled_clusters)
+
+# Repeat Simple Random Sampling 5 Times
+srs_results_list <- replicate(5, {
+  srs_sample <- data %>%
+    sample_n(size = sample_size)
+  
+  srs_mean_gpa <- mean(srs_sample$GPA)
+  srs_sd_gpa <- sd(srs_sample$GPA) / sqrt(nrow(srs_sample))
+  
+  data.frame(
+    iteration = NA,
+    SRS_Mean = srs_mean_gpa,
+    SRS_SD = srs_sd_gpa
+  )
+}, simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+srs_results_df <- do.call(rbind, lapply(seq_along(srs_results_list), function(i) {
+  srs_results_list[[i]]$iteration <- i
+  return(srs_results_list[[i]])
+}))
+
+# Print the SRS results
+print("Simple Random Sampling Results (5 Runs):")
+print(srs_results_df)
+
+
+
+```
+
+
+```{r}
+
+# Combine Cluster Sampling and SRS Results into One Table
+combined_results <- merge(results_df, srs_results_df, by = "iteration", all = TRUE)
+
+# Print the combined results
+print("Combined Results for Cluster Sampling and Simple Random Sampling (5 Runs):")
+print(combined_results)
+
+
+```
+
+Averages:
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+data <- read.csv("https://raw.githubusercontent.com/Kyle-Weber/Penn/refs/heads/main/506%20PROJECT.csv")
+
+# Ensure that the 'cluster' column is correctly formatted as a factor or numeric
+data$cluster <- as.factor(data$cluster)
+
+# Function to calculate the estimators for one sample of clusters
+calculate_estimators <- function(data) {
+  # Sample 9 clusters explicitly using dplyr::filter
+  sampled_clusters <- data %>%
+    dplyr::filter(cluster %in% sample(unique(cluster), 9, replace = FALSE))  # Ensure no duplicate clusters
+
+  # Calculate the unbiased estimator
+  unbiased_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(cluster_mean = mean(GPA), .groups = "drop") %>%
+    summarise(
+      unbiased_estimator = mean(cluster_mean),
+      sd_unbiased = sqrt(sum((cluster_mean - mean(cluster_mean))^2) / (n() * (n() - 1)))
+    )
+
+  # Calculate the ratio estimator
+  ratio_results <- sampled_clusters %>%
+    group_by(cluster) %>%
+    summarise(Y_i = sum(GPA), X_i = sum(Height), .groups = "drop") %>%
+    summarise(
+      ratio_estimator = sum(Y_i) / sum(X_i) * mean(data$Height, na.rm = TRUE),
+      sd_ratio = sqrt(sum((Y_i / X_i - sum(Y_i) / sum(X_i))^2) / ((length(Y_i) * (length(Y_i) - 1)))) * mean(data$Height, na.rm = TRUE)
+    )
+
+  # Return results as a single-row data frame
+  return(data.frame(
+    iteration = 1,
+    unbiased_estimator = unbiased_results$unbiased_estimator,
+    sd_unbiased = unbiased_results$sd_unbiased,
+    ratio_estimator = ratio_results$ratio_estimator,
+    sd_ratio = ratio_results$sd_ratio
+  ))
+}
+
+# Repeat the process 5 times
+set.seed(123)  # For reproducibility
+results_list <- replicate(5, calculate_estimators(data), simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+results_df <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+  results_list[[i]]$iteration <- i
+  return(results_list[[i]])
+}))
+
+# Assuming you have these defined earlier in the cluster sampling section
+n_clusters <- 154 # Total number of clusters
+sampled_clusters <- 9 # Number of clusters sampled
+
+# Calculate the sample size for SRS equivalent to cluster sample
+students_per_cluster <- nrow(data) / n_clusters
+sample_size <- round(students_per_cluster * sampled_clusters)
+
+# Repeat Simple Random Sampling 5 Times
+srs_results_list <- replicate(5, {
+  srs_sample <- data %>%
+    sample_n(size = sample_size)
+  
+  srs_mean_gpa <- mean(srs_sample$GPA)
+  srs_sd_gpa <- sd(srs_sample$GPA) / sqrt(nrow(srs_sample))
+  
+  data.frame(
+    iteration = NA,
+    SRS_Mean = srs_mean_gpa,
+    SRS_SD = srs_sd_gpa
+  )
+}, simplify = FALSE)
+
+# Add iteration numbers and bind rows into one data frame
+srs_results_df <- do.call(rbind, lapply(seq_along(srs_results_list), function(i) {
+  srs_results_list[[i]]$iteration <- i
+  return(srs_results_list[[i]])
+}))
+
+# Combine Cluster Sampling and SRS Results into One Table
+combined_results <- merge(results_df, srs_results_df, by = "iteration", all = TRUE)
+
+# Calculate the average of each column
+average_results <- combined_results %>%
+  summarise(across(starts_with("unbiased_estimator"), mean, na.rm = TRUE),
+            across(starts_with("sd_unbiased"), mean, na.rm = TRUE),
+            across(starts_with("ratio_estimator"), mean, na.rm = TRUE),
+            across(starts_with("sd_ratio"), mean, na.rm = TRUE),
+            across(starts_with("SRS_Mean"), mean, na.rm = TRUE),
+            across(starts_with("SRS_SD"), mean, na.rm = TRUE))
+
+# Print the average results
+print("Average Results for Cluster Sampling and Simple Random Sampling:")
+print(average_results)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
