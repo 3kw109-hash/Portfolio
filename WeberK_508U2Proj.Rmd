@@ -1,0 +1,294 @@
+---
+title: "Unit 2 Project"
+author: Kyle Weber
+output: html_document
+date: "Due: Tuesday, October 28, 2025"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Front Matter
+```{r, message=FALSE, warning=FALSE}
+#Load libraries
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(glmnet)
+library(pls)
+library(mgcv)
+COD <- read_csv("C:/Users/3kw10/Downloads/STA508/datasets/STAT508_CODGamesP2.csv")
+CODfull <- subset(COD, FullPartial == "Full")
+apply(CODfull, 2, function(x) sum(is.na(x)))
+```
+
+## Task 1
+
+#### Analysis and Discussion of Method used for Calculating XP
+
+The method used for calculating TotalXP involved looking at the variable XPType to determine if it is Regular or Double XP being calculated. The boxplot of TotalXP by XPType shows some differences between the levels Regular and Double XP. Double XP has a visibly larger median and variance than Regular, showing that Double XP results in more experience points. This is confirmed by the summary statistics with Double XP having a median of 17399 and standard deviation of 5587.141 vs Regular's median of 9398 and standard deviation of 3362.117. The values confirm that Double XP does result in nearly twice the TotalXP than Regular does.
+
+During modeling, XPType will be used as a categorical predictor that is transformed into a dummy variable, either 1 or 0 depending on the level. This approach will allow it to be used in models that can not handle categorical variables without transformation. Given its extremely large difference between the two levels and fundamental correlation with XPTotal this will have to be incorporated into the following models. 
+
+```{r}
+# ggplot 
+ggplot(CODfull, mapping = aes(x = XPType, y = TotalXP, fill = XPType)) +
+  geom_boxplot() +
+  labs(title = "Distribution of TotalXP by XPType",
+       x = "XP Type",
+       y = "Total XP Earned") +
+  theme_minimal()
+
+
+# summary statistics
+xp_summary <- CODfull %>%
+  group_by(XPType) %>%
+  summarise(
+    mean_XP   = mean(TotalXP, na.rm = TRUE),
+    median_XP = median(TotalXP, na.rm = TRUE),
+    sd_XP     = sd(TotalXP, na.rm = TRUE),
+    n         = n()
+  )
+print(xp_summary)
+```
+
+
+
+#### Analysis and Discussion of the Mode
+
+Looking at the boxplot between Total XP and Mode shows that both levels seemingly have similar deviations with Hardcore's deviation potentially being larger with more outliers present. However, Core has a larger median that Hardcore, indicating that Core matches result in more TotalXP. The summary statistics show Core has a median of 16300.5 with a standard deviation of 5636.256 while Hardcore has a median of 11533.0 and standard deviation of 6415.151. The results confirm the differences seen in the boxplot, with the outcome maybe being related to integral gameplay differences between the two modes. 
+
+Again, when it comes to modeling, Mode as a categorical variable it will need to be transformed into a dummy variable to be used with the coming models. The large difference between the two in terms of mean XP means that it should be included in the following models, but its large variance might affect its actual significance.
+
+```{r}
+# ggplot 
+ggplot(CODfull, mapping = aes(x = Mode, y = TotalXP, fill = Mode)) +
+  geom_boxplot() +
+  labs(title = "Distribution of TotalXP by Game Mode",
+       x = "Game Mode",
+       y = "Total XP Earned") +
+  theme_minimal()
+
+# summary statistics
+mode_summary <- CODfull %>%
+  group_by(Mode) %>%
+  summarise(
+    mean_XP   = mean(TotalXP, na.rm = TRUE),
+    median_XP = median(TotalXP, na.rm = TRUE),
+    sd_XP     = sd(TotalXP, na.rm = TRUE),
+    n         = n()
+  )
+print(mode_summary)
+
+```
+
+
+
+## Task 2
+
+### Part 1
+
+I will be incorporating seven predictor variables into each of the following three models with the variables being selected based on both logical and statistical reasoning. XPType and Mode were selected based on both yielding higher or lower experience depending on the level chosen with double XP and core generating more XP. The variables Score, Eliminations, and Damage are direct player performance metrics and likely relate heavily with TotalXP justifying their inclusion. The amount of deaths a player has might result in either XP penalties, gains or be tied to overall performance, so this variable will be kept for the model. The last variable chosen is PlayerTeamScore, this could account for win or total team performance bonuses. In total the seven variables are XPType, Mode, Score, Eliminations, Deaths, Damage, and PlayerTeamScore, all of which are potentially tied to how the game calculates the amount of TotalXP to provide the player. 
+
+### Part 2
+
+Before starting to build any of the models some data preparation is performed by converting the categorical variables to factors and also splitting the data into a training set with 80% of the observations and a validation set with the remaining 20% of observations. 
+```{r}
+# convert categorical variables in factors
+CODfull$XPType <- as.factor(CODfull$XPType)
+CODfull$Mode <- as.factor(CODfull$Mode)
+
+# data split
+set.seed(123)
+trainInd <- sample(1:nrow(CODfull), floor(0.8*nrow(CODfull)),
+                   replace = FALSE)
+set.seed(NULL)
+
+#create training and validation sets
+
+train <- CODfull[trainInd, ]
+validation <- CODfull[-trainInd, ]
+```
+
+
+#### Model1 Analysis and Discussion
+
+The linear regression model was fit with all seven of the previous variables mentioned before a summary and RMSE value for the model was printed to test its performance. The multiple linear regression model achieved an adjusted R^2 value of 0.649, meaning that around 65% of the total variance in TotalXP is explained by the selected predictors. As expected, XPTypeRegular is strongest negative predictor giving 7,507 less XP than double XP. Score, Eliminations, and Player team score are all statistically significant positive predictors, while Deaths, Damage, and Mode are not statistically significant. The most surprising revelation here is that Damage is not statistically significant, playing little to no role when distributing XP, making the overall amount of Eliminations much more important than the amount of damage actually dealt. Additionally, model 1's RMSE is 4,286, providing a decent baseline for comparing model results going forward. 
+
+```{r}
+# model 1 
+model1 <- lm(TotalXP ~ XPType + Mode + Score + Eliminations + Deaths + Damage + PlayerTeamScore, 
+               data = train)
+
+summary(model1)
+
+# Predictions and RMSE
+model1_pred <- predict(model1, newdata = validation)
+model1_rmse <- sqrt(mean((validation$TotalXP - model1_pred)^2))
+cat("Model 1 RMSE: ", model1_rmse, "\n")
+```
+
+#### Model2 Analysis and Discussion
+
+Model 2 (LASSO) used 10 fold cross validation to choose the optimal value of lambda min, which was 104.38. From this, two variables Mode and Deaths were eliminated with their coefficients shrinking to zero, while retaining XPType (-7345), Score (0.69), Eliminations (237), Damage (0.53), and PlayerTeamScore (8.44). Again, XPType is the most influential variable with Eliminations in second place, the rest of the variables show smaller but still positive contributions. The validation RMSE of 4319.62 is almost identical to the previous linear regression model at about 34 points higher, showing very similar predictive power between the two models.
+
+
+```{r}
+# build model
+Xtrain <- model.matrix(TotalXP ~ XPType + Mode + Score + Eliminations + Deaths + Damage + PlayerTeamScore, data = train)[, -1]
+ytrain <- train$TotalXP
+
+Xval <- model.matrix(TotalXP ~ XPType + Mode + Score + Eliminations + Deaths + Damage + PlayerTeamScore, data = validation)[,-1]
+yval <- validation$TotalXP
+
+
+
+# Fit LASSO with cross validation
+set.seed(123)
+lassoCV <- cv.glmnet(x = Xtrain, y = ytrain,
+                     family = "gaussian",
+                     alpha = 1,         
+                     nfolds = 10,
+                     standardize = TRUE)
+set.seed(NULL)
+
+# optimal min lambda 
+lassoLambdaMin <- lassoCV$lambda.min
+cat("Optimal Lambda Value: ", lassoLambdaMin, "\n")
+plot(lassoCV)
+
+# predict model and find RMSE
+model2 <- glmnet(Xtrain, ytrain, alpha = 1, lambda = lassoLambdaMin)
+lasso_pred <- predict(model2, s = lassoLambdaMin, newx = Xval)
+model2_rmse <- sqrt(mean((yval - lasso_pred)^2))
+cat("Model 2 RMSE: ", model2_rmse, "\n")
+
+
+
+## remaining variables
+
+#store the coefficients
+coefLamMin <- predict(lassoCV, s = lassoCV$lambda.min, type = "coefficients")
+
+#Create a data frame for comparing the coefficients
+tempdf <- 
+  data.frame(Variable = row.names(coefLamMin), 
+             lamMin = as.numeric(coefLamMin))
+
+tempdf
+```
+#### Model3 Analysis and Discussion
+
+For model 3, a PCR model was fit with standardized predictors and using 10 fold cross validation. At first, 7 components were considered for the model, but using an RMSE plot to determine the number of components that should be retained showed that the ideal number to keep is 5. At 5 components the model captured 97.13% of the predictor variance and 65.40% of the response variance, along with an RMSE of 4200.59. This is the lowest RMSE value out of the 3 models so far, being about 85 points lower than model 1. 
+
+```{r}
+set.seed(123)
+pcrFit <- pcr(TotalXP ~ XPType + Mode + Score + Eliminations + Deaths + Damage + PlayerTeamScore,
+                 data = train, center = TRUE, scale = TRUE,
+              validation = "CV", segments = 10)
+set.seed(NULL)
+summary(pcrFit)
+```
+```{r}
+tempRMSE <- RMSEP(pcrFit)
+
+#Create object (ggplotDF) for visualizing
+ggplotDF <- data.frame(Components = 0:7, 
+                       RMSE = tempRMSE$val[1, , ]) #Use [2, , ] for adjusted CV values
+
+#Determine the optimal (lowest) CV RMSE
+optMpcr <- which.min(tempRMSE$val[1, , ]) 
+
+#Create Plot
+ggplot(data = ggplotDF, mapping = aes(x = Components, y = RMSE)) +
+  geom_line() +
+  geom_point() +
+  geom_point(data = ggplotDF[optMpcr,], color = "red", shape = 1, size = 4) +
+  scale_x_continuous(breaks = seq(0, 40, 2)) +
+  labs(x = "Number of Components",
+       y = "RMSE (from 10-fold CV)")
+```
+
+```{r}
+yhatPCR <- predict(pcrFit, newdata = validation, ncomp = 5)
+
+#MSE and RMSE
+MSEpcr <- mean((validation$TotalXP - yhatPCR)^2)
+cat("Model 3 MSE: ", MSEpcr, "\n")
+RMSEpcr <- sqrt(MSEpcr)
+cat("Model 3 RMSE: ", RMSEpcr, "\n")
+```
+### Part 3
+
+Across all three models the predictive accuracy was rather similar with RMSE ranging from 4286, 4320, and 4201 respectively. The highest RMSE value (Model 2) is about 119 points higher than the lowest (Model 3) which itself is only 85 points lower than model 2.
+Each model has strong points such as linear regression being very interpretable, LASSO being less prone to overfitting, and PCR showing the best handling of multicollinearity However, model 3 (PCR) is still the best model here out of the 3 given its lower RMSE value and good handling of multicollinearity, making it the best at generalizing to new data and providing accurate predictions. 
+
+
+## Task 3
+
+#### Initial Model Building
+
+In building the GAM model (model 4), the significant predictors from the previous models were reviewed to determine which variables should remain. Scatterplots of each were examined to assess if their relationship with TotalXP was linear or non-linear. This led to finding Eliminations to be distinctly non-linear while the other variables were linear. Out of the seven original variables, Damage and Deaths were dropped due to them being mostly insignificant in the previous models and worsening the overall results of the GAM model when added. Therefore, the included predictors are XPType - categorical (dummy), Mode - categorical (dummy), Score - linear, PlayerTeamScore - linear, and Eliminations as a non-linear smoothing term. 
+
+```{r}
+# Scatterplot
+ggplot(CODfull, mapping = aes(x = Eliminations, y = TotalXP)) +
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linewidth = 1) +
+  labs(
+    title = "TotalXP vs Eliminations",
+    x = "Eliminations",
+    y = "TotalXP" ) +
+  theme_minimal()
+```
+
+#### Analysis, Discussion, and Comparison of Results
+
+Fitting the GAM model with these features showed that all of the features except for PlayerTeamScore are statistically significant contributors to TotalXP. The largest influence is XPTypeRegular with a large negative coefficient of -7367.8, indicating that regular matches result in significantly less XP than double XP which is expected. Score (0.86) and PlayerTeamScore (8.9) are both smaller but positive predictors similar to the previous models. ModeHardcore was the second largest influence with a negative coefficient of (-1414) showing that the hardcore game mode offers less XP than the regular game mode. The smooth term for Eliminations showed substantial non-linearity with an effective degrees of freedom of 8.42. The non-linearity of Eliminations can be seen visually by its plot which shows significant curves. The model overall explained 67.4% of the deviance with an adjusted R^2 of 0.663. 
+
+To provide a fair comparison across all four models the RMSE scores of each was evaluated. The GAM model produced an RMSE of 4300, which is worse than model 1 (4286) and model 3 (4201) but better than  model 2 (4320). While the GAM model did capture the non-linearity of Eliminations, its improved flexibility did not result in stronger predictive accuracy and generalization. Overall the GAM model finished in the middle of all of the models tested, with the PCR model still being the most preferred. 
+
+
+```{r}
+model4 <- gam(TotalXP ~ XPType + Score + PlayerTeamScore + Mode + s(Eliminations),
+              data = train)
+
+summary(model4)
+```
+
+```{r}
+plot(model4, all.terms = TRUE)
+```
+
+
+
+
+```{r}
+pred_val <- predict(model4, newdata = validation)
+Model4_rmse <- sqrt(mean((validation$TotalXP - pred_val)^2))
+cat("Model 4 RMSE: ", Model4_rmse, "\n")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

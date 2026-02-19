@@ -1,0 +1,503 @@
+---
+title: "Unit 3 Project"
+author: Kyle Weber
+output: html_document
+date: "Due: Tuesday, November 18, 2025"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Front Matter
+```{r, warning = FALSE, message = FALSE}
+#Load libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(caret)
+library(rpart)
+library(pROC)
+library(FNN)
+library(rpart)
+library(rattle)
+library(glmnet)
+library(rpart.plot)
+COD <- read_csv("C:/Users/3kw10/Downloads/STA508/datasets/STAT508_CODGamesP2.csv")
+colSums(is.na(COD))
+```
+
+## Task 1 EDA and Wrangling before Modeling
+
+After restricting the data set to only contain games where the player completed a full match, a new binary variable called Outcome was created. This variable indicates if the player either won (1) or lost (0) the match. This variable was created using PlayerTeamScore and OpponentTeamScore. If PlayerTeamScore was greater than OpponentTeamScore then it was determined to be a win, while the opposite would be labeled a loss. If the scores were equal, essentially a tie, the match would be removed as the goal is to find out if the game was a binary win or loss. 
+
+```{r}
+# keep only full matches
+cod_full <- subset(COD, FullPartial == "Full")
+
+# create binary outcome variable
+cod_full$Outcome <- ifelse(cod_full$PlayerTeamScore > cod_full$OpponentTeamScore, 1,
+                       ifelse(cod_full$PlayerTeamScore < cod_full$OpponentTeamScore, 0, NA))
+
+# remove ties
+cod_full <- subset(cod_full, !is.na(Outcome))
+```
+
+
+Summary statistics showed that the total number of matches was 489, with 274 (56%) of them being wins, while there were 215 losses (44%). This is visually confirmed by the bar chart. Overall, the data set is relatively balanced with the player winning slightly more than they lost. 
+
+```{r}
+# check count
+str(cod_full$Outcome)
+# frequency table
+table(cod_full$Outcome)
+# proportion table
+prop.table(table(cod_full$Outcome))
+
+
+# bar chart
+ggplot(cod_full, mapping = aes(x = factor(Outcome, labels = c("Loss", "Win")))) +
+  geom_bar(fill = c("lightcoral", "steelblue")) +
+  labs(title = "Distribution of Match Outcomes",
+       x = "Match Outcome",
+       y = "Count") +
+  theme_minimal()
+
+```
+
+
+## Task 2 Classification Models
+
+#### Data Split:
+
+Before starting to build any of the models some data preparation is performed by splitting the data into a training set with 80% of the observations and a validation set with the remaining 20% of observations. 
+
+```{r}
+# Data split
+set.seed(123)
+trainInd <- sample(1:nrow(cod_full), floor(0.8 * nrow(cod_full)), replace = FALSE)
+set.seed(NULL)
+
+# Create training and validation sets
+train <- cod_full[trainInd, ]
+validation <- cod_full[-trainInd, ]
+```
+
+#### Logistic Regression
+
+To decide which variables would be included in the model, a forwards and backwards stepwise regression was applied on the full model with the exception of PlayerTeamScore and OpponentTeamScore as they were used in the variable creation of Outcome. The stepwise selection used AIC to refine the model and choose the variables that were both parsimonious and had strong predictive power. The variables that were retained are Eliminations, Deaths, Score, Damage, TotalXP, Mode, and XPType. In total seven variables were kept while Level and Game were dropped from the model. 
+
+```{r}
+# full logistic regression model excluding team scores
+full_mod <- glm(Outcome ~ Eliminations + Deaths + Score + Damage + TotalXP + Mode + Game + XPType + Level,
+                family = binomial, data = train)
+
+# forwards and back stepwise selection 
+step_mod <- step(full_mod, direction = "both")
+
+# summary
+summary(step_mod)
+```
+
+
+The summary statistics for model 1 indicates that higher Eliminations and TotalXP are associated with increased odds of winning, while the variables Deaths, Score, and Damage slightly reduce the odds of the player winning. Additionally, the player had lower odds of winning in the mode Hardcore than in Core (OR = 0.27), while Regular XP matches more than tripled the odds of winning compared to DoubleXP (OR = 3.46). This initial look at the variables provides a good base for understanding the relationships that each model has on Outcome. 
+
+```{r}
+model1 <- glm(Outcome ~ Eliminations + Deaths + Score + Damage + TotalXP + Mode + XPType,
+              family = binomial,
+              data = train)
+
+summary(model1)
+
+exp(coef(model1))  
+```
+
+The logistic regression performance was evaluated on the validation set using a 0.5 classification threshold. The confusion matrix showed an overall accuracy of 63%, with a recall and precision of about 67%. An ROC curve was also generated which gave and AUC value of 0.725, indicating the the model is able to generalize to new data reasonably well while still being very interpretable. 
+
+```{r}
+logit_Prob <- predict(model1, newdata = validation,
+        type = "response")
+
+
+# pred + threshold 0.5
+logit_pred <- ifelse(logit_Prob > 0.5, 1, 0)
+
+# build confusion table
+CM <- table(Predicted = logit_pred, Actual = validation$Outcome)
+CM
+
+
+TP <- CM["1", "1"]
+FP <- CM["1", "0"]
+TN <- CM["0", "0"]
+FN <- CM["0", "1"]
+
+# metrics
+recall      <- TP / (TP + FN)   
+precision   <- TP / (TP + FP)   
+specificity <- TN / (TN + FP)   
+accuracy    <- (TP + TN) / sum(CM)  
+
+# Print results
+recall
+precision
+specificity
+accuracy
+
+#Create the ROC curve
+rocCurve <- roc(response = validation$Outcome,
+                predictor = logit_Prob,
+                plot = TRUE,
+                print.auc = TRUE, 
+                legacy.axes = TRUE)
+
+as.numeric(rocCurve$auc)
+```
+
+
+#### k-Nearest Neighbors
+
+The k-nearest neighbors model was started by selecting all numeric and categorical predictors other than PlayerTeamScore and OpponentTeamScore. The categorical variables (Mode, XPType, Game, and Level) were converted into dummy variables so they could be included in the model in addition to all predictors being standardized to ensure equal weighting. Again the data was split into an 80% training set and 20% validation set. 
+
+
+```{r}
+
+# select predictors, numeric + categorical
+predictors <- cod_full %>%
+  select(Eliminations, Deaths, Score, Damage, TotalXP, Mode, XPType, Game, Level)
+
+# turn categorical variables into dummy variables
+predictors_dummy <- model.matrix(~ ., data = predictors)[, -1]  
+
+# scale all predictors
+cod_scaled <- as.data.frame(scale(predictors_dummy))
+
+# add outcome back
+cod_scaled$Outcome <- cod_full$Outcome
+
+# data split
+set.seed(123)
+trainInd <- sample(1:nrow(cod_scaled), floor(0.8*nrow(cod_scaled)), replace = FALSE)
+set.seed(NULL)
+
+train <- cod_scaled[trainInd, ]
+validation <- cod_scaled[-trainInd, ]
+```
+
+
+A loop was used to find the optimal value of k, which turned out to be 24, yielding an accuracy of 0.622. The optimal K and its value can be visually confirmed by the graph below. 
+
+```{r}
+xvars <- setdiff(names(train), "Outcome")
+
+maxK <- 25   
+accVec <- rep(NA, maxK)
+
+for(i in 1:maxK){
+  knnResTemp <- knn(train = train[, xvars, drop = FALSE],
+                    test = validation[, xvars, drop = FALSE],
+                    cl = train$Outcome,
+                    k = i)
+  
+  validation <- validation %>%
+    mutate(predOutcome = factor(knnResTemp, levels = levels(factor(train$Outcome))))
+  
+  accVec[i] <- mean(validation$Outcome == validation$predOutcome)
+}
+
+# accuracy
+accVec
+
+# plot 
+tempDF <- data.frame(k = 1:maxK, Accuracy = accVec)
+
+ggplot(tempDF, aes(x = k, y = Accuracy)) +
+  geom_line() +
+  geom_point(data = tempDF[which.max(accVec), ], color = "red", shape = 1, size = 3) +
+  labs(x = "Number of Nearest Neighbors", y = "Accuracy")
+
+# optimal k
+which.max(accVec)
+accVec[which.max(accVec)]
+```
+
+
+
+
+Using the optimal value of k found, a kNN model was fit with a confusion matrix and ROC curve to gather the exact metrics of the model. This gave a validation accuracy of 62.2%, a precision of 0.62, a sensitivity of 0.85, and specificity of 0.37. The model's high sensitivity shows that it did well in correctly determining where the player won, while its low specificity showed it struggled in determining matches where the player lost. The ROC curve showed an AUC value of 0.567, which means its discrimination ability is only moderate. Overall the kNN model had moderate predictive power but its low specificity and AUC value indicate it may struggle to generalize well. This might have something to do with the relatively low sample size reducing its effectiveness. 
+
+```{r}
+set.seed(123)
+# fit kNN at optimal k
+optK <- 24
+knn_pred <- knn(train = train[, xvars, drop = FALSE],
+                test = validation[, xvars, drop = FALSE],
+                cl = train$Outcome,
+                k = optK,
+                prob = TRUE)
+
+# confusion matrix
+CM_knn <- confusionMatrix(knn_pred, factor(validation$Outcome, levels = c(0,1)), positive = "1")
+
+
+# metrics
+accuracy_knn <- CM_knn$overall["Accuracy"]
+recall_knn <- CM_knn$byClass["Sensitivity"]
+precision_knn <- CM_knn$byClass["Precision"]
+specificity_knn <- CM_knn$byClass["Specificity"]
+
+accuracy_knn
+recall_knn
+precision_knn
+specificity_knn
+
+
+knn_probs <- attr(knn_pred, "prob")
+knn_probs <- ifelse(knn_pred == "1", knn_probs, 1 - knn_probs)
+
+set.seed(NULL)
+#Create the ROC curve
+rocCurve <- roc(response = validation$Outcome,
+                predictor = knn_probs,
+                plot = TRUE,
+                print.auc = TRUE, 
+                legacy.axes = TRUE)
+
+as.numeric(rocCurve$auc)
+
+```
+
+#### Classification Tree
+
+
+To start the classification tree, a full tree was grown using all predictors other than PlayerTeamScore and OpponentTeamScore with an initial complexity parameter of 0.003 and 10 fold cross validation. Using the one standard error metric to determine the optimal value of cp, 0.0407 was determined to be the best fit and was subsequently used to prune the tree. 
+
+```{r}
+predictors <- cod_full %>%
+  select(Level, Eliminations, Deaths, Score, Damage, TotalXP, XPType, Mode, Game)
+
+# dummy encode categorical variables
+predictors_dummy <- model.matrix(~ ., data = predictors)[, -1]
+
+# add Outcome back
+cod_tree <- as.data.frame(predictors_dummy)
+cod_tree$Outcome <- cod_full$Outcome
+
+# new train/validation split
+set.seed(123)
+trainInd2 <- sample(1:nrow(cod_tree), floor(0.8*nrow(cod_tree)), replace = FALSE)
+set.seed(NULL)
+
+train2 <- cod_tree[trainInd2, ]
+validation2 <- cod_tree[-trainInd2, ]
+
+
+
+set.seed(123)
+fullTree <- rpart(Outcome ~ ., 
+                  data = train2, 
+                  method = "class", 
+                  cp = 0.003, 
+                  xval = 10)
+set.seed(NULL)
+
+# cross-validation results
+fullTree$cptable
+
+# visualize full tree
+fancyRpartPlot(fullTree, cex = 0.4)
+
+```
+
+
+```{r}
+# row with smallest CV error
+cpRow <- which.min(fullTree$cptable[, "xerror"])
+
+# calculate threshold = min(xerror) + xstd
+target <- fullTree$cptable[cpRow, "xerror"] + fullTree$cptable[cpRow, "xstd"]
+
+# find first cp where xerror < threshold
+cpRow1se <- which(fullTree$cptable[, "xerror"] < target)[1]
+
+cpChoice1se <- fullTree$cptable[cpRow1se, "CP"]
+
+# display chosen cp
+cpChoice1se
+
+
+# prune using cp from 1-SE rule
+prunedTree <- prune(fullTree, cp = cpChoice1se)
+
+# visualize pruned tree
+fancyRpartPlot(prunedTree, cex = 0.65)
+
+```
+
+
+
+
+The pruned tree allowed for predictions to be run on the validation set, which achieved an overall accuracy of 57.1%. The confusion matrix also showed that the model was better at identifying wins than losses, similar to the previous kNN model. The sensitivity was 0.75 whereas the specificity was 0.35, so the model was able to correctly predict 41 out of 55 wins compared to 15 out of 43 losses. As with all other models done so far an AUC value was found which turned out to be 0.547 showing that its discriminative power is very limited. Additionally, the ranked variable importance showed that Deaths was overwhelmingly dominant with a score of 19.82 with Game following behind in second place with scores of 3.93 (TDM) and 2.95 (HardPoint).
+
+
+```{r}
+# predict on validation data
+prunedPred <- predict(prunedTree, newdata = validation2, type = "class")
+
+# confusion matrix
+Cmat <- table(Predicted = prunedPred, Actual = validation2$Outcome)
+Cmat
+```
+
+
+```{r}
+# accuracy
+accuracy_tree <- mean(prunedPred == validation2$Outcome)
+accuracy_tree
+
+confusionMatrix(prunedPred, factor(validation2$Outcome, levels = c(0,1)), positive = "1")
+
+# variable importance from pruned tree
+importance <- prunedTree$variable.importance
+importance
+
+# top 3 variables
+head(sort(importance, decreasing = TRUE), 3)
+
+# predict probabilities for validation set
+tree_probs <- predict(prunedTree, newdata = validation2, type = "prob")[, "1"]
+
+# ROC curve
+roc_tree <- roc(response = validation2$Outcome,
+                predictor = tree_probs,
+                plot = TRUE,
+                print.auc = TRUE,
+                legacy.axes = TRUE,
+                main = "Classification Tree ROC Curve")
+
+# numeric AUC value
+as.numeric(roc_tree$auc)
+
+```
+
+
+#### Comparison of Models
+
+Comparing the three models logistic regression, kNN, and classification tree, predictive accuracy and generalization was the overall goal. The kNN model achieved an accuracy of 60.2% with a high sensitivity (0.82) and a low specificity (0.37). The classification tree had a total accuracy of 57.1% with a specificity of 0.35 and sensitivity of 0.75. The logistic regression model achieved the highest accuracy of 63.3% with a sensitivity of 0.673 and a specificity of 0.581. This means that the logistic regression achieved the highest accuracy of the three with a decent sensitivity and specificity value, providing the best balance of correctly identifying both wins and losses. Combined with the highest AUC value (0.725) the regression model was able to generalize much more effectively to new data than the other approaches. While the kNN and classification tree models had high sensitivity, their very low specificity lowered their overall usefulness in predicting outcomes. 
+
+
+## Task 3 Extending an Unit 2 Topic
+
+
+#### References
+
+In order to answer the question, I used guides from these sources as well as many other more specific sources when needed. I tried to combine the information of how to create a LASSO logistic regression with the code, format, and information from both the logistic regression and lasso modules / homeworks we did in class. 
+
+
+https://www.sthda.com/english/articles/36-classification-methods-essentials/149-penalized-logistic-regression-essentials-in-r-ridge-lasso-and-elastic-net/ 
+
+https://www.statology.org/lasso-regression-in-r/ 
+
+#### Creating and Analyzing the Model
+
+
+To turn the logistic regression from task 2 into a LASSO logistic regression, an 80-20 split was done with the following predictors included in the model, Eliminations, Deaths, Score, Damage, TotalXP, Mode, Game, and XPType. Here, Level was dropped from the model given its previous insignificance along with numerous errors generated from mismatched factor levels across the training and validation sets. Since Level has previously been insignificant and conceptually should not have any impact of the players wins or losses, this should improve the codes clarity without any substantial impact. Next, the categorical variables were transformed into dummy variables and a 10 fold cross validation was done to determine the optimal value of lambda which was 0.003. 
+
+This lambda value was fit into the final model to generate the end results, showing that the most important retained positive predictors were, Eliminations, TotalXP, and XPTypeRegular, while the negative key predictors were, GameKill Confirmed, Deaths, and ModeHardCore. While many of the predictors were shrunk close to zero, the only predictor to be completely shrunk was GameTDM. The overall Accuracy of the model was 0.633, the sensitivity was 0.673, the specificity was 0.581, and the AUC value equaled 0.714. The model appears to do relatively well at predicting wins and losses with it being slightly better at predicting wins than losses and with an AUC score of 0.714 its descriminative ability is rather high. 
+
+Overall, these results are all identical to the regular Logistic Regression that was created in task 2 with the exception of this model having a slightly lower AUC score. These similar results could be due to the small lambda value that did not meaningfully shrink the coefficients to zero with all but 1 still remaining. Since both the LASSO and the stepwise functions chose very similar variables to keep in the model, it is not very surprising the results are so similar. 
+
+```{r}
+# Data split
+set.seed(123)
+trainInd3 <- sample(1:nrow(cod_full), floor(0.8 * nrow(cod_full)), replace = FALSE)
+set.seed(NULL)
+
+# Create training and validation sets
+train3 <- cod_full[trainInd3, ]
+validation3 <- cod_full[-trainInd3, ]
+
+# build  training model
+X <- model.matrix(Outcome ~ Eliminations + Deaths + Score + Damage + TotalXP + Mode + Game + XPType,
+                  data = train3)[, -1]
+Y <- train3$Outcome
+
+# build validation model
+X_val <- model.matrix(Outcome ~ Eliminations + Deaths + Score + Damage + TotalXP + Mode + Game + XPType,
+                      data = validation3)[, -1]
+
+Y_val <- validation3$Outcome
+
+# fit LASSO logistic regression with cv
+set.seed(123)
+lassoCV <- cv.glmnet(x = X, y = Y,
+                     family = "binomial",
+                     alpha = 1,         
+                     nfolds = 10)
+set.seed(NULL)
+
+# optimal min lambda 
+lambda_min  <- lassoCV$lambda.min
+print(lambda_min)
+
+# create final model for lambda min
+set.seed(123)
+lasso_model <- glmnet(x = X, y = Y,
+                      family = "binomial",
+                      alpha = 1,
+                      lambda = lambda_min)
+
+set.seed(NULL)
+
+#store the coefficients
+coefLamMin <- predict(lassoCV, s = lassoCV$lambda.min, type = "coefficients")
+
+# create a data frame for comparing the coefficients
+tempdf <- 
+  data.frame(Variable = row.names(coefLamMin), 
+             lamMin = as.numeric(coefLamMin))
+
+tempdf
+
+# predict probabilities on validation set
+prob_lasso <- predict(lasso_model, newx = X_val, type = "response")
+
+# threshold 0.5
+pred_lasso <- ifelse(prob_lasso > 0.5, 1, 0)
+
+
+# confusion matrix and metrics
+CM_lasso <- confusionMatrix(factor(pred_lasso, levels = c(0,1)),
+                            factor(Y_val, levels = c(0,1)), positive = "1")
+
+accuracy_lasso   <- CM_lasso$overall["Accuracy"]
+sensitivity_lasso <- CM_lasso$byClass["Sensitivity"]
+specificity_lasso <- CM_lasso$byClass["Specificity"]
+precision_lasso   <- CM_lasso$byClass["Precision"]
+
+# results
+accuracy_lasso
+sensitivity_lasso
+specificity_lasso
+precision_lasso
+
+
+# ROC curve
+roc_lasso <- roc(response = validation3$Outcome,
+                predictor = as.vector(prob_lasso),
+                plot = TRUE,
+                print.auc = TRUE,
+                legacy.axes = TRUE,
+                main = "Lasso Logistic Regression ROC Curve")
+
+# numeric AUC value
+as.numeric(roc_lasso$auc)
+```
+
+
+
+
+
+
+
