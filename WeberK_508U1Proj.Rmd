@@ -1,0 +1,309 @@
+---
+title: "Unit 1 Project"
+author: Kyle Weber
+output: html_document
+date:   9/22/2025
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Front Matter
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+library(GGally)
+library(factoextra)
+library(broom)
+library(mclust)
+library(gridExtra)
+
+cod <- read_csv("C:/Users/3kw10/Downloads/STA508/datasets/STAT508_CODGamesP1.csv")
+head(cod)
+
+```
+
+
+
+## Task 1
+#### Discussion 
+
+#### Research Question:
+Is there a difference in the average number of eliminations between the game modes Core and Hardcore?
+
+#### Findings:
+
+The research question aims to see if the difference in rules for each game mode leads to potentially different outcomes in the number of players eliminated. With lower health in Hardcore matches would it potentially lead to more fast paced game play and rapid kills, or instead a slower more methodical playing style with reduced eliminations? In the 40 Core and 235 Hardcore matches in the data set played by the individual, the Core mode resulted in a mean of 17.20 eliminations per match along with a median of 17, standard deviation of 6.59, and IQR of 8.5. Alternatively, Hardcore resulted in the following values, mean = 15.56, median = 15, SD = 6.51,  and IQR = 8. Variability appears to be roughly the same between the two game modes, however, Core does have a smaller sample size so its estimates might be less precise. It appears that the Core mode resulted in more eliminations than Hardcore (17.2 vs 15.56), however, a two-sample t-test found that the difference in mean eliminations between Core and Hardcore is not statistically significant (p=0.151). Therefore, there is not enough evidence to conclude that there is any difference in the mean amount of eliminations between the two modes. The assumptions of the T-test were checked using a histogram, Q-Q plot, and variance comparison. The results showed that all assumptions were met with the data being normally distributed although some outliers were present, as well as the variances being approximately equal 43.4 vs 42.3.
+
+A visual representation in the form of a side by side box plot shows Core with a slightly higher median and similar spread than Hardcore, illustrating the above results. Hardcore's distribution also includes several high-end outliers indicating a few standout games. Overall, the box-plot helps to confirm the findings of a small non-significant difference between the two game modes eliminations.
+
+
+```{r, warning=FALSE}
+Summary_Statistics <- cod %>%
+  group_by(Mode) %>%
+  summarise(
+    Mean_Eliminations = mean(Eliminations, na.rm = TRUE),
+    Median_Eliminations = median(Eliminations, na.rm = TRUE),
+    Std_Deviation = sd(Eliminations, na.rm = TRUE),
+    IQR = IQR(Eliminations, na.rm = TRUE),
+    n = n(),
+    .groups = 'drop'
+  )
+
+Summary_Statistics %>%
+  kable(caption = "Summary Statistics for Gamemode: Core vs Hardcore")
+```
+
+
+
+```{r}
+ggplot(cod, mapping = aes(x = Mode, y = Eliminations, fill = Mode)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "red") +
+  labs(
+    title = "Number of Eliminations by Game Mode",
+    x = "Game Mode",
+    y = "Eliminations"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)      
+  )
+```
+
+```{r}
+t_test_result <- t.test(Eliminations ~ Mode, data = cod)
+t_test_result
+
+```
+
+```{r}
+# Histogram, assumption for t-test
+ggplot(cod, aes(x = Eliminations)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  facet_wrap(~ Mode)
+
+# Q-Q, assumption for t-test
+ggplot(cod, aes(sample = Eliminations)) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ Mode)
+
+# Variance
+by(cod$Eliminations, cod$Mode, var, na.rm = TRUE)
+
+```
+
+
+
+## Task 2
+
+#### Discussion of Data Wrangling and Approach to PCA
+
+Before starting any PCA, the data set was checked to ensure that there were no missing values in any of the variables, which there were not. Since PCA handles numeric variables only, the non-numeric variables such as Level, FullPartial, XP, Mode, and game were dropped, leaving only the seven numeric variables. Next the variances of each variable were checked to see if standardization was needed, with the results showing significant differences such as Damage (6.7e5) vs Deaths (2.6e1). The large differences in variance between the variables makes scaling necessary in order to avoid the larger values from disproportionately influencing the PCs. This is done by setting each variable to have a mean of 0 and standard deviation of 1 before the PCA is run. The number of principal components that will be retained will be based on a scree plot and the cumulative proportion of variance explained. The amount kept is determined by retaining enough to explain a substantial proportion of variance while also avoiding keeping too many that it would cause over fitting. 
+
+```{r}
+#check missing values
+colSums(is.na(cod))
+#create numeric data set
+cod_num <- cod %>%
+  select(where(is.numeric)) %>%
+  drop_na()
+
+#variances
+variances <- apply(cod_num,  2, var)
+print(variances)
+```
+
+#### Results
+
+The PCA results in the Scree plot and the PCA summary show that PC1 = 37.7% variance explained, PC2 = 26.6%, PC3 = 11.6%, PC4 = 9.6%, PC5 = 7.3%, PC6 = 5.4%, and PC7 = 1.9%. Together, the first three principal components explain 75.9% of the total variance, with the first two alone explaining 64.3%. Considering that 75.9% makes up a substantial proportion of the variance and using the scree plot's elbow rule where the proportion of variance explained starts to level out after PC3, only the first 3 principal components will be kept. 
+
+The plot for the first three PCs revealed that PC1 is primarily negatively driven by Eliminations, Score, TotalXP, and Damage. PC2 is negatively associated with OpponentTeamScore, Deaths, and PlayerTeamScore, while PC3 was dominated primarily by a positive Damage loading followed by negative Score loading. PC1 seemingly represents overall player effectiveness, while PC2 is characterized by team metrics, and PC3 is where the player managed to obtain a lot of damage but failed to turn it into kills or a higher score. 
+
+The biplot confirms these patterns with Score, TotalXP, and Eliminations clustered together and positively correlated, while OpponentTeamScore, PlayerTeamScore, and Deaths are negatively correlated and clustered together. The difference in direction between the two clusters could show that individual performance is not perfectly correlated with team performance. 
+
+```{r}
+cod_pca <- prcomp(cod_num, center = TRUE, scale. = TRUE)
+
+fviz_screeplot(X = cod_pca, 
+               geom = c("bar", "line"),
+               choice = "variance",
+               ncp = 7, 
+               addlabels = TRUE 
+            
+               ) +
+  labs(x = "Principal Component",
+       y = "Percentage of Variance Explained") +
+  scale_y_continuous(limits = c(0,100))
+
+summary(cod_pca)
+```
+
+
+
+```{r}
+
+tidy(cod_pca, matrix = "loadings") %>%
+  filter(PC %in% 1:3) %>% 
+  ggplot(aes(x = value, y = column)) +
+  facet_wrap(~ PC) +
+  geom_col(aes(fill = column), show.legend = FALSE) +
+  labs(x = "Loadings", y = "Predictors", 
+       title = "Loadings for the First Three Principal Components") +
+  theme_bw() 
+```
+
+
+
+```{r}
+cod_pca$rotation[ ,1:3]
+
+fviz_pca_biplot(cod_pca, repel = TRUE,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969" , # Individuals color
+                geom.ind = "point"
+                )
+
+```
+
+
+
+
+
+## Task 3
+
+#### Clustering on High Dimensional Data 
+
+Clustering was based on the same seven standardized numeric variables that were used in the previous PCA analysis. Similar to the previous section, standardization is necessary here due to the variables having very different scales and k-means being sensitive to large differences in variance. The standardization was conducted the same way, with mean = 0, and standard deviation being 1, preventing larger variances from dominating the results. K-means was chosen for clustering because of its straightforward nature and easy interpretation, along with being very computationally efficient. 
+
+Both an elbow and silhouette plot were created to determine the optimal number of (k) clusters to keep, with both of them supporting k=4 as the ideal amount. The elbow plot showed a distinct bend at k=4 while the silhouette confirmed this in its optimal k decision. The cluster sizes for each are 22, 26, 69, and 158 respectively, while the total within cluster sum of squares is 929.66. 
+
+
+```{r}
+
+cod_scaled <- scale(cod_num, center = TRUE, scale = TRUE)
+cod_scaled <- as.data.frame(cod_scaled)
+
+#elbow plot
+set.seed(123)
+fviz_nbclust(x = cod_scaled, FUNcluster = kmeans,
+             method = "wss", k.max = 15,
+             nstart = 25, iter.max = 15) +
+  labs(subtitle = "Elbow Method for k-means")
+
+#silhouette plot
+set.seed(123)
+fviz_nbclust(cod_scaled, kmeans, method = "silhouette") +
+  labs(title = "Silhouette Method for Optimal k")
+
+
+set.seed(123)
+cod_km4 <- kmeans(x = cod_scaled, centers = 4,
+              nstart = 25, iter.max = 15)
+#results
+cat("K-means Results (k=4):\n\n")
+cat("Total Within-Cluster SS:", round(cod_km4$tot.withinss, 2), "\n\n")
+cat("Cluster sizes:", table(cod_km4$cluster), "\n")
+```
+
+#### Clustering after PCA
+
+Here, clustering was performed on the first three principal components that were selected in Task 2, with them explaining a total variance of 76%. The standardized data was projected onto the principal components where k-means clustering was then done on the reduced dimension data. Again, an elbow plot and silhouette plot were used to find the appropriate number of clusters to keep. The elbow plot shows a bend around k=4 while the silhouette suggests k=3 as the optimal number. However, k=4 was chosen for increased consistency and comparison across methods in addition to the strong elbow point shown in the graph. 
+
+The PCA clustering gives very similar results to the previous method with the cluster sizes being 21, 26, 69, 159 and a substantially reduced total within cluster sum of squares of 482.16. The reduction of the within cluster variance highlights the effectiveness of the PCA in creating a more compact representation of the data. 
+
+```{r}
+cod_scaled2 <- scale(cod_num, center = TRUE, scale = TRUE)
+cod_scaled2 <- as.data.frame(cod_scaled2)
+
+CODPCA <- prcomp(cod_scaled2, center = FALSE, scale. = FALSE)
+pca_scores <- as.data.frame(CODPCA$x[, 1:3])
+
+
+set.seed(124)
+fviz_nbclust(x = pca_scores, FUNcluster = kmeans,
+             method = "wss", k.max = 15,
+             nstart = 25, iter.max = 15) +
+  labs(subtitle = "Elbow Method for k-means")
+
+
+set.seed(124)
+fviz_nbclust(pca_scores, kmeans, method = "silhouette") +
+  labs(title = "Silhouette Method for Optimal k")
+
+
+set.seed(124)
+km_pca <- kmeans(x = pca_scores, centers = 4,
+              nstart = 25, iter.max = 15)
+
+cat("K-means Results (k=4):\n\n")
+cat("Total Within-Cluster SS:", round(km_pca$tot.withinss, 2), "\n\n")
+cat("Cluster sizes:", table(km_pca$cluster), "\n")
+
+```
+
+
+#### Comparison of Results
+
+The cluster assignments from both methods give near identical results with an Adjusted Rand Index (ARI) of 0.99, showing almost the exact same partitioning of the two approaches. The main difference between the two methods can be seen in the cluster comparison table with only 1 observation in total being different. In the high dimensional clustering, cluster 1 has 22 observations and cluster 4 has 158, while in the PCA clustering, cluster 1 has 21 observations while cluster 4 has 159. Aside from the single flipped observation and lower within cluster variance in PCA clustering, there is no meaningful difference between the two. This flipped observation can be seen in the side by side scatter plots, where the top red dot in cluster 1 on the left HD scatter plot is in cluster 4 and purple in the PCA scatter plot on the right. Ultimately, there is a very minimal difference between clustering on the original standardized variables and the PCA reduced scores with PCA even providing a compact representation of the data. 
+
+```{r}
+
+#hd plot
+
+temp_df_hd <-
+  as.data.frame(CODPCA$x[, 1:2]) %>%
+  mutate(cluster = as.factor(cod_km4$cluster))
+
+HD_plot <- ggplot(temp_df_hd, mapping = aes(x = PC1, y = PC2, 
+                    color = cluster, shape = cluster)) +
+  geom_point(size = 2) +
+  labs(title = "HD Clustering Plot",
+       x = "PC1",
+       y = "PC2") + 
+  theme_minimal()
+
+# pca plot
+
+temp_df_pca <- as.data.frame(CODPCA$x[, 1:2]) %>%
+  mutate(cluster = as.factor(km_pca$cluster))
+
+PCA_plot <- ggplot(temp_df_pca, aes(x = PC1, y = PC2, 
+                              color = cluster, shape = cluster)) +
+  geom_point(size = 2, alpha = 0.8) +
+  labs(title = "PCA Reduced Clustering Plot",
+       x = "PC1", y = "PC2") +
+  theme_minimal()
+
+#side by side
+grid.arrange(HD_plot, PCA_plot, ncol = 2)
+
+
+
+# Adjusted Rand Index (ARI)
+clusters_hd  <- cod_km4$cluster
+clusters_pca <- km_pca$cluster
+ari <- adjustedRandIndex(clusters_hd, clusters_pca)
+cat("Adjusted Rand Index:", round(ari, 3), "\n")
+
+
+# cluster size comparision table
+comparison_table <- data.frame(
+  Cluster = 1:4,
+  HD_Size = as.numeric(table(cod_km4$cluster)),
+  PCA_Size = as.numeric(table(km_pca$cluster))
+)
+print("Cluster Size Comparison:")
+print(comparison_table)
+
+```
+
+
+
+
+
